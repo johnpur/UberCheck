@@ -36,6 +36,7 @@ v.1.0.0
 04/19/2009
 
 04/22/2009: version 1.0 - Initial program version.
+04/25/2009: version 1.1 - Added logic to the capitalization check, made it less restrictive
 
 
 =end  
@@ -125,12 +126,14 @@ class Check
         ActiveRecord::Schema.define do
             create_table :ucattentions, :force => true do |table|
                 table.column :error, :string
+                table.column :specific_error, :string
                 table.column :artist, :string
                 table.column :year, :string
                 table.column :title, :string
             end
             
             add_index :ucattentions, [:error]
+            add_index :ucattentions, [:specific_error]
             add_index :ucattentions, [:artist]
             add_index :ucattentions, [:year]
             add_index :ucattentions, [:title]
@@ -142,13 +145,18 @@ class Check
         $dl_dir = "D:/- Downloading -/Uber/MP3"
         $good_dir = "D:/- Downloading -/Uber/MP3 - Good"
         $attn_dir = "D:/- Downloading -/Uber/MP3 - Attention"
+        $dup_dir = "D:/- Downloading -/Uber/MP3 - Duplicates"
+        $extended_error = "Initialized..."
         
         # Assume that the download directory exists (dirs have to be enforced
         # before being checked...
         
-        # Create the "good" and "needs attention" directories
+        # Create the "good", "needs attention", and "duplicate" directories
         File.makedirs $good_dir
         File.makedirs $attn_dir
+        File.makedirs $dup_dir
+        
+        # Set which directory is going to be the source, either the "download" or "needs attention" dir
         
         if directory == "attn_dir"
             $check_dir = $attn_dir
@@ -164,6 +172,7 @@ class Check
         
         $good_album_count = 0
         $bad_album_count = 0
+        $dup_album_count = 0
         
         # Look at each directory in the download directory.
         
@@ -214,6 +223,7 @@ class Check
                     # Directory does not have a 'year' tag **NEEDS ATTENTION**
                     data_record = Ucattention.new
                         data_record.error = "No YEAR tag"
+                        data_record.specific_error = "No YEAR tag"
                         data_record.artist = name_array[0]
                         data_record.year = "no"
                         data_record.title = name_array[1]
@@ -222,7 +232,13 @@ class Check
                     $bad_album_count = $bad_album_count + 1
                     
                     if $program_mode == "move_files"
-                        File.move(next_directory, $attn_dir)
+                        begin
+                            File.move(next_directory, $attn_dir)
+                        rescue NotImplementedError
+                            # A duplicate directory as a destination
+                            $dup_album_count = $dup_album_count + 1
+                            File.move(next_directory, $dup_dir)
+                        end
                     end
                     
                     return
@@ -232,6 +248,7 @@ class Check
                     # Directory does not have a 'year' tag **NEEDS ATTENTION**
                     data_record = Ucattention.new
                         data_record.error = "No YEAR tag"
+                        data_record.specific_error = "No YEAR tag"
                         data_record.artist = name_array[0]
                         data_record.year = "no"
                         data_record.title = name_array[1]
@@ -240,7 +257,13 @@ class Check
                     $bad_album_count = $bad_album_count + 1
                     
                     if $program_mode == "move_files"
-                        File.move(next_directory, $attn_dir)
+                        begin
+                            File.move(next_directory, $attn_dir)
+                        rescue NotImplementedError
+                            # A duplicate directory as a destination
+                            $dup_album_count = $dup_album_count + 1
+                            File.move(next_directory, $dup_dir)
+                        end
                     end
                     
                     return
@@ -257,6 +280,7 @@ class Check
             # **NEEDS ATTENTION** General error
             data_record = Ucattention.new
                 data_record.error = "General Error"
+                data_record.specific_error = "Format of directory is odd"
                 data_record.artist = name_array[0]
                 data_record.year = name_array[1]
                 data_record.title = name_array[2]
@@ -265,7 +289,13 @@ class Check
             $bad_album_count = $bad_album_count + 1
             
             if $program_mode == "move_files"
-                File.move(next_directory, $attn_dir)
+                begin
+                    File.move(next_directory, $attn_dir)
+                rescue NotImplementedError
+                    # A duplicate directory as a destination
+                    $dup_album_count = $dup_album_count + 1
+                    File.move(next_directory, $dup_dir)
+                end
             end
             
             return
@@ -320,7 +350,13 @@ class Check
                     end
                     
                     # Check to see if this is the cover art file
-                    # This check fails if the "folder.jpg" file is not all lowercase
+                    # Fix the case where the leading F is capitalized
+                    
+                    if next_file.include? "Folder.jpg"
+                        # Fix this
+                        File.rename(next_file, next_file.downcase)
+                        folder_JPG = true
+                    end
                     
                     if next_file.include? "folder.jpg"
                         folder_JPG = true
@@ -354,10 +390,15 @@ class Check
             data_record = Ucgood.new
             
             if $program_mode == "move_files"
-                File.move(next_directory, $good_dir)
+                begin
+                    File.move(next_directory, $good_dir)
+                rescue NotImplementedError
+                    # A duplicate directory as a destination
+                    $dup_album_count = $dup_album_count + 1
+                    File.move(next_directory, $dup_dir)
+                end
             end
             
-                    
             $good_album_count = $good_album_count + 1
             
         else
@@ -365,7 +406,13 @@ class Check
             data_record = Ucattention.new
             
             if $program_mode == "move_files"
-                File.move(next_directory, $attn_dir)
+                begin
+                    File.move(next_directory, $attn_dir)
+                rescue NotImplementedError
+                    # A duplicate directory as a destination
+                    $dup_album_count = $dup_album_count + 1
+                    File.move(next_directory, $dup_dir)
+                end
             end
             
             $bad_album_count = $bad_album_count + 1
@@ -383,6 +430,7 @@ class Check
         else
             printf(" MP3's: NO")
             data_record.error = "No MP3 Files"
+            data_record.specific_error = "No MP3 files"
         end
         
         if folder_JPG == true
@@ -390,6 +438,7 @@ class Check
         else
             printf(" Cover Art: NO")
             data_record.error = "No Cover Art"
+            data_record.specific_error = "No Cover Art"
         end 
         
         if leading_cap == true
@@ -397,6 +446,7 @@ class Check
         else
             printf(" Capitalization: NO")
             data_record.error = "Not Capitalized"
+            data_record.specific_error = $extended_error
         end 
                 
         data_record.save
@@ -416,22 +466,81 @@ class Check
             if title_words[0,1] == '['
                 title_words.delete! "["                
             end
+            
+            # Check for ampersand
+            if title_words[0,1] == '&'
+                next # go onto the next word                
+            end
+            
+            # Check for period
+            if title_words[0,1] == '.'
+                next # go onto the next word                
+            end
+            
+            # Check for an apostrophe
+            if title_words[0,1] == "'"
+                next # go onto the next word                
+            end
+            
+            # Check for a pound sign
+            if title_words[0,1] == '#'
+                next # go onto the next word                
+            end
+            
+            # Check for a pound sign
+            if title_words[0,1] == '+'
+                next # go onto the next word                
+            end
+            
+            # Check for special words -- more can be added as they are discovered
+            if (title_words[0,2] == "EP" ||          # Extended Play
+                title_words[0,2] == "LP" ||          # Long Play
+                title_words[0,2] == "UK" ||         # United Kingdom
+                title_words[0,2] == "CD" ||          # Maxi CD
+                title_words[0,2] == "JP" ||          # Japanese
+                title_words[0,3] == "BBC" ||         # British Broadcasting Company
+                title_words[0,3] == "VH1" ||         # Video Hits 1
+                title_words[0,3] == "MTV" ||         # Music Television
+                title_words[0,4] == "KFOG" ||        # KFOG San Francisco
+                title_words[0,3] == "OST")           # Original Soundtrack
+                
+                next    # go onto the next word
+            end
+                
+            
+            # See if the word is a number
+            if ((title_words[0,1] >= '0') && (title_words[0,1] <= '9'))
+                next # go onto the next word                
+            end
         
             if ((title_words[0,1] >= 'A') && (title_words[0,1] <= 'Z'))
                 # first character is uppercase
                 # check the next character for lowercase, assume is true then the rest of the word is lowercase
                 # first check to see if there is a second character
-                if title_words.length != 2
+                if ((title_words.length != 2) && (title_words.length != 1))
+                    
+                    # check to see if the word is II (or derivation)
+                    if title_words[1,1] == 'I'
+                        next # go onto the next word                
+                    end
+                    
+                    # check to see if the second character is a filename quote
+                    if title_words[1,1] == "'"
+                        next # go onto the next word                
+                    end
+                    
                     if ((title_words[1,1] >= 'a') && (title_words[1,1] <= 'z'))
                         # second character is lowercasecase
                         # continue looping
                     else
-                        # second character is not lowercase                 
+                        # second character is not lowercase 
+                        $extended_error = title_words                        
                         return(-2) # Bad return code
                     end
                 end
             else
-                # first character is not uppercase            
+                # first character is not uppercase 
+                $extended_error = title_words            
                 return(-1) # Bad return code
             end
             
@@ -443,9 +552,16 @@ class Check
     
     def report
         
-        printf("\n\n ========================================")
-        puts format("\n\n Good CD's: %d - Needs Attention CD's: %d", $good_album_count, $bad_album_count)
-        printf("\n ========================================")
+        printf("\n\n ============================================================")
+        
+        
+        if $program_mode == "move_files"
+             puts format("\n\n Good CD's: %d - Needs Attention CD's: %d - Duplicate CD's: %d", $good_album_count, $bad_album_count, $dup_album_count)
+        else
+            puts format("\n\n Good CD's: %d - Needs Attention CD's: %d", $good_album_count, $bad_album_count)
+        end
+        
+        printf("\n ============================================================")
         puts "\n\n Processing complete."
         
     end
